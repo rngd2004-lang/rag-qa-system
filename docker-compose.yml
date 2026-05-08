@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+  backend:
+    build: .
+    container_name: rag-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - API_KEY=${API_KEY}
+      - BASE_URL=${BASE_URL:-https://api.deepseek.com/v1}
+      - MODEL=${MODEL:-deepseek-chat}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-3-small}
+      - CHROMA_DIR=/app/data/chroma_db
+      - UPLOAD_DIR=/app/data/uploads
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: rag-frontend
+    ports:
+      - "7860:7860"
+    environment:
+      - BACKEND_URL=http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped

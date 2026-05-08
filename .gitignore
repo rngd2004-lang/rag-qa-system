@@ -1,0 +1,26 @@
+# 环境变量
+.env
+
+# 向量库数据
+data/chroma_db/
+
+# 上传的文档
+data/uploads/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Docker
+.docker/
+
+# OS
+.DS_Store
+Thumbs.db
