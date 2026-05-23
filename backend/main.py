@@ -60,6 +60,7 @@ logger.info(f"向量库已有 {indexed_count} 条记录")
 class ChatRequest(BaseModel):
     question: str
     top_k: int = 5
+    history: list[dict] | None = None
 
 
 # ── API ────────────────────────────────────────────────
@@ -70,37 +71,70 @@ def health():
     return {"status": "ok", "indexed_chunks": cnt}
 
 
+@app.get("/documents")
+def list_documents():
+    """列出所有已索引的文档"""
+    docs = engine.list_documents()
+    return {"status": "ok", "documents": docs, "total": len(docs)}
+
+
+@app.delete("/documents/{filename}")
+def delete_document(filename: str):
+    """删除指定文档及其所有索引"""
+    try:
+        deleted = engine.delete_document(filename)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    if deleted == 0:
+        raise HTTPException(404, f"文档不存在或无索引: {filename}")
+    return {"status": "ok", "filename": filename, "chunks_deleted": deleted}
+
+
 @app.post("/upload")
 async def upload(files: list[UploadFile] = File(...)):
     if not files or (len(files) == 1 and files[0].filename == ""):
         raise HTTPException(400, "请选择至少一个文件")
 
+    existing_docs = {d["filename"] for d in engine.list_documents()}
+    skipped = []
     saved_paths = []
     for f in files:
         ext = os.path.splitext(f.filename)[1].lower()
         if ext not in (".pdf", ".docx", ".txt", ".md"):
             raise HTTPException(400, f"不支持的文件格式: {f.filename} ({ext})")
 
-        save_path = os.path.join(UPLOAD_DIR, f"{uuid.uuid4().hex[:8]}_{f.filename}")
+        base_name = f.filename
+        if base_name in existing_docs:
+            skipped.append(base_name)
+            continue
+
+        save_path = os.path.join(UPLOAD_DIR, f"{uuid.uuid4().hex[:8]}_{base_name}")
         with open(save_path, "wb") as out:
             shutil.copyfileobj(f.file, out)
         saved_paths.append(save_path)
         logger.info(f"已保存: {save_path}")
 
-    chunk_count = engine.build_index(saved_paths)
-    return {
+    chunk_count = 0
+    if saved_paths:
+        chunk_count = engine.build_index(saved_paths)
+
+    result = {
         "status": "ok",
         "uploaded": len(saved_paths),
         "chunks_indexed": chunk_count,
         "files": [os.path.basename(p) for p in saved_paths],
     }
+    if skipped:
+        result["skipped"] = skipped
+        result["message"] = f"{len(skipped)} 个文件已存在，已跳过"
+    return result
 
 
 @app.post("/chat")
 def chat(req: ChatRequest):
     async def event_stream():
         try:
-            async for event in engine.ask(req.question, req.top_k):
+            async for event in engine.ask(req.question, req.top_k, history=req.history):
                 if event["type"] == "token":
                     yield f"data: {event['content']}\n\n"
                 elif event["type"] == "sources":

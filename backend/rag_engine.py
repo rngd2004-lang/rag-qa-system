@@ -170,18 +170,72 @@ class RAGEngine:
             f"- {src}: \"{excerpt}...\"" for src, excerpt in seen.items()
         )
 
-    async def ask(self, question: str, top_k: int = TOP_K):
+    # ── 文档管理 ───────────────────────────────────────
+
+    def list_documents(self) -> list[dict]:
+        """返回已索引的文档列表（去重）"""
+        if self.vectorstore is None:
+            return []
+        collection = self.vectorstore._collection
+        result = collection.get(include=["metadatas"])
+        seen: dict[str, int] = {}
+        for meta in result.get("metadatas", []) or []:
+            src = (meta or {}).get("source", "未知")
+            seen[src] = seen.get(src, 0) + 1
+        return [{"filename": k, "chunks": v} for k, v in seen.items()]
+
+    def delete_document(self, filename: str) -> int:
+        """按文件名删除文档的所有分块，返回删除数量"""
+        if self.vectorstore is None:
+            raise RuntimeError("向量库未初始化")
+        collection = self.vectorstore._collection
+        result = collection.get(include=["metadatas"])
+        ids_to_delete = []
+        for i, meta in enumerate(result.get("metadatas", []) or []):
+            if (meta or {}).get("source") == filename:
+                ids_to_delete.append(result["ids"][i])
+        if ids_to_delete:
+            collection.delete(ids=ids_to_delete)
+            logger.info(f"已删除文档: {filename}, {len(ids_to_delete)} chunks")
+        return len(ids_to_delete)
+
+    # ── 生成回答 ───────────────────────────────────────
+
+    async def ask(self, question: str, top_k: int = TOP_K, history: list[dict] | None = None):
         """检索 → 拼接上下文 → LLM 流式生成"""
         docs = self.retrieve(question, top_k=top_k)
         context = self._format_context(docs)
         sources = self._format_sources(docs)
 
-        chain = (
-            {"context": lambda _: context, "question": RunnablePassthrough()}
-            | RAG_PROMPT
-            | self.llm
-            | StrOutputParser()
-        )
+        chain_input = {"context": lambda _: context, "question": RunnablePassthrough()}
+        if history:
+            history_text = "\n".join(
+                f"{'用户' if h['role'] == 'user' else '助手'}: {h['content']}" for h in history[-6:]
+            )
+            chain_input["history"] = lambda _: history_text
+
+        prompt = RAG_PROMPT
+        if history:
+            prompt = ChatPromptTemplate.from_template("""你是一个基于知识库的智能问答助手。
+请严格根据以下检索到的文档内容回答问题。如果文档中没有相关信息，请如实说"文档中未找到相关信息"，不要编造。
+
+【历史对话】
+{history}
+
+【检索到的文档内容】
+{context}
+
+【用户问题】
+{question}
+
+【回答要求】
+1. 基于文档内容回答，不要添加文档中没有的信息
+2. 结合历史对话理解用户意图，回答末尾注明信息来源（文档名 + 相关片段摘录）
+3. 如果文档内容不足以回答问题，直接说明
+
+回答：""")
+
+        chain = chain_input | prompt | self.llm | StrOutputParser()
 
         full_answer = ""
         async for chunk in chain.astream(question):
