@@ -25,6 +25,8 @@
 | 后端 | FastAPI |
 | 前端 | Gradio |
 | 部署 | Docker Compose |
+| 重排模型 | CrossEncoder |
+| 缓存与限流 | Redis |
 
 ## 快速开始
 
