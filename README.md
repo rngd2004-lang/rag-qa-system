@@ -99,5 +99,7 @@ rag-qa-system/
 │   └── app.py               # Gradio UI
 ├── data/                    # 上传文件 + 向量库
 ├── docker-compose.yml
+├── scripts/
+│   └── init.sh              # 环境初始化脚本
 └── README.md
 ```
