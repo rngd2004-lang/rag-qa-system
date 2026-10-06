@@ -46,6 +46,9 @@ cd backend && python main.py
 # 4. 启动前端 (终端2)
 cd frontend && python app.py
 # → http://localhost:7860
+
+# 5.也可使用一键部署脚本快速初始化环境
+./scripts/init.sh
 ```
 
 ## Docker 一键启动
